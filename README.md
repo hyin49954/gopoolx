@@ -134,7 +134,3 @@ for {
 
 ---
 
-## License
-
-MIT
-
