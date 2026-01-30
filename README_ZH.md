@@ -16,9 +16,11 @@
   - 普通任务与带返回值任务中的 panic 都会被安全捕获并转换为 `error`
   - 不会打爆整个 worker 协程
 - **Future 泛型结果**：通过 `SubmitWithResult` + `Future[T]` 支持有返回值任务的异步等待
-- **可选非阻塞提交**：
-  - 配置 `WithNonBlocking` 后，队列满时丢弃任务而不是阻塞调用方
-  - 不会影响 `Wait()` 的退出
+- **队列满策略**：
+  提供三种队列满时的处理策略：
+  - `QueueFullWait`（默认）：阻塞等待直到有空位
+  - `QueueFullDiscard`：直接丢弃任务
+  - `QueueFullReturnError`：返回错误并记录失败
 - **简单、清晰、工程化 API**：贴近真实业务代码的使用方式
 
 ---
@@ -87,26 +89,70 @@ fmt.Println(v1, v2)
 pool.Wait()
 ```
 
-### 非阻塞提交模式
+### 队列满策略
+
+gopoolx 提供了三种队列满时的处理策略：
+
+#### 1. 等待模式（默认）
 
 ```go
 pool := gopoolx.New(
     10,
     gopoolx.WithQueueSize(1000),
-    gopoolx.WithNonBlocking(), // 队列满时直接丢弃新任务
+    // QueueFullWait 是默认策略，此配置可选
+    gopoolx.WithQueueFullPolicy(gopoolx.QueueFullWait),
 )
 
 pool.Run(context.Background())
 
-for {
-    pool.Submit(func(ctx context.Context) error {
-        // 短任务
-        return nil
-    })
+// 队列满时 Submit 会阻塞，直到有空位再插入
+pool.Submit(func(ctx context.Context) error {
+    return nil
+})
+```
+
+#### 2. 丢弃模式
+
+```go
+pool := gopoolx.New(
+    10,
+    gopoolx.WithQueueSize(1000),
+    gopoolx.WithQueueFullPolicy(gopoolx.QueueFullDiscard), // 队列满时直接丢弃任务
+)
+
+pool.Run(context.Background())
+
+// Submit 会立即返回 nil，被丢弃的任务不会执行
+err := pool.Submit(func(ctx context.Context) error {
+    return nil
+})
+// 丢弃模式下 err 始终为 nil
+```
+
+> 注意：丢弃模式下，被丢弃的任务不会执行，也不会出现在 `pool.Errors()` 中。
+
+#### 3. 返回错误模式
+
+```go
+pool := gopoolx.New(
+    10,
+    gopoolx.WithQueueSize(1000),
+    gopoolx.WithQueueFullPolicy(gopoolx.QueueFullReturnError), // 队列满时返回错误
+)
+
+pool.Run(context.Background())
+
+// 队列满时 Submit 会返回 ErrQueueFull 错误
+err := pool.Submit(func(ctx context.Context) error {
+    return nil
+})
+if err != nil {
+    // 处理队列满错误
+    log.Println("提交任务失败:", err)
 }
 ```
 
-> 注意：非阻塞模式下，被丢弃的任务不会执行，也不会出现在 `pool.Errors()` 中。
+> 注意：返回错误模式下，提交失败的任务会被记录到 `pool.Errors()` 中。
 
 ---
 

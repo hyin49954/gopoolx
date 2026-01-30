@@ -15,14 +15,14 @@ func SubmitWithResult[T any](
 	future := newFuture[T]()
 
 	// 将带返回值的函数包装成 Pool 所需的 Task 形式
-	pool.Submit(func(ctx context.Context) error {
+	if err := pool.Submit(func(ctx context.Context) error {
 		var (
 			res T
 			err error
 		)
 
 		// 通过 defer 捕获 panic，保证无论成功、失败还是 panic，
-		// Future 都能被正确标记为“已完成”并唤醒等待方。
+		// Future 都能被正确标记为"已完成"并唤醒等待方。
 		defer func() {
 			if r := recover(); r != nil {
 				var zero T
@@ -34,7 +34,11 @@ func SubmitWithResult[T any](
 
 		res, err = fn(ctx)
 		return err
-	})
+	}); err != nil {
+		// 如果提交失败（如队列满且策略为返回错误），立即完成 Future 并返回错误
+		var zero T
+		future.complete(zero, err)
+	}
 
 	return future
 }

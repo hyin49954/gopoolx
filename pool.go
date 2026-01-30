@@ -53,16 +53,16 @@ func New(workerNum int, opts ...Option) *Pool {
 }
 
 // Submit 提交一个任务到池中，内部会递增 WaitGroup 计数。
-// 行为说明：
-//   - 默认模式（nonBlocking == false）下：
-//   - 若任务队列已满，Submit 会在此处阻塞，直到有空间可以写入
-//   - 非阻塞模式（nonBlocking == true）下：
-//   - 若队列已满，则直接丢弃该任务，不会阻塞调用方
-//   - 被丢弃的任务不会被执行，也不会出现在错误收集器中
-func (p *Pool) Submit(task Task) {
+// 根据配置的队列满策略，行为如下：
+//   - QueueFullWait: 队列满时阻塞等待，直到有空位再插入（默认）
+//   - QueueFullDiscard: 队列满时直接丢弃任务，不返回错误
+//   - QueueFullReturnError: 队列满时返回 ErrQueueFull 错误，任务计入失败
+func (p *Pool) Submit(task Task) error {
 	p.wg.Add(1)
-	// 非阻塞模式：当任务队列已满时直接丢弃任务，避免阻塞调用方。
-	if p.opts.nonBlocking {
+
+	switch p.opts.queueFullPolicy {
+	case QueueFullDiscard:
+		// 队列满时直接丢弃任务
 		select {
 		case p.tasks <- task:
 			// 正常入队，由 worker 负责执行并在结束时调用 wg.Done
@@ -70,11 +70,28 @@ func (p *Pool) Submit(task Task) {
 			// 队列已满：撤销之前的 Add，保持 WaitGroup 计数正确
 			p.wg.Done()
 		}
-		return
-	}
+		return nil
 
-	// 默认阻塞模式：在任务队列满时阻塞，直到有空间写入。
-	p.tasks <- task
+	case QueueFullReturnError:
+		// 队列满时返回错误，任务计入失败
+		select {
+		case p.tasks <- task:
+			// 正常入队，由 worker 负责执行并在结束时调用 wg.Done
+		default:
+			// 队列已满：撤销之前的 Add，将错误加入错误收集器，并返回错误
+			p.wg.Done()
+			p.errs.Add(ErrQueueFull)
+			return ErrQueueFull
+		}
+		return nil
+
+	case QueueFullWait:
+		fallthrough
+	default:
+		// 默认等待模式：在任务队列满时阻塞，直到有空间写入
+		p.tasks <- task
+		return nil
+	}
 }
 
 // Run 启动指定数量的 worker。

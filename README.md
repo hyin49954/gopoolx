@@ -28,9 +28,11 @@ Designed for real-world production scenarios, not just toy examples.
 - **Generic Future results**  
   Use `SubmitWithResult` + `Future[T]` to run tasks that return values.
 
-- **Optional non-blocking submit**  
-  - With `WithNonBlocking`, submitting to a full queue will **drop** the task
-  - The caller is never blocked and `Wait()` will still complete correctly
+- **Queue full policy**  
+  Three strategies when the queue is full:
+  - `QueueFullWait` (default): Block until space is available
+  - `QueueFullDiscard`: Drop the task silently
+  - `QueueFullReturnError`: Return an error and record the failure
 
 - **Simple, production-friendly API**
 
@@ -100,26 +102,70 @@ fmt.Println(v1, v2)
 pool.Wait()
 ```
 
-### Non-blocking submit mode
+### Queue full policy
+
+gopoolx provides three strategies when the task queue is full:
+
+#### 1. Wait (default)
 
 ```go
 pool := gopoolx.New(
     10,
     gopoolx.WithQueueSize(1000),
-    gopoolx.WithNonBlocking(), // drop tasks when the queue is full
+    // QueueFullWait is the default, so this is optional
+    gopoolx.WithQueueFullPolicy(gopoolx.QueueFullWait),
 )
 
 pool.Run(context.Background())
 
-for {
-    pool.Submit(func(ctx context.Context) error {
-        // short-lived task
-        return nil
-    })
+// Submit will block if the queue is full until space is available
+pool.Submit(func(ctx context.Context) error {
+    return nil
+})
+```
+
+#### 2. Discard
+
+```go
+pool := gopoolx.New(
+    10,
+    gopoolx.WithQueueSize(1000),
+    gopoolx.WithQueueFullPolicy(gopoolx.QueueFullDiscard), // drop tasks when queue is full
+)
+
+pool.Run(context.Background())
+
+// Submit will return nil immediately, dropped tasks are not executed
+err := pool.Submit(func(ctx context.Context) error {
+    return nil
+})
+// err is always nil in discard mode
+```
+
+> Note: In discard mode, dropped tasks are **not executed** and will **not** appear in `pool.Errors()`.
+
+#### 3. Return error
+
+```go
+pool := gopoolx.New(
+    10,
+    gopoolx.WithQueueSize(1000),
+    gopoolx.WithQueueFullPolicy(gopoolx.QueueFullReturnError), // return error when queue is full
+)
+
+pool.Run(context.Background())
+
+// Submit will return ErrQueueFull if the queue is full
+err := pool.Submit(func(ctx context.Context) error {
+    return nil
+})
+if err != nil {
+    // Handle queue full error
+    log.Println("Failed to submit task:", err)
 }
 ```
 
-> Note: in non-blocking mode, dropped tasks are **not executed** and will **not** appear in `pool.Errors()`.
+> Note: In return error mode, failed submissions are recorded in `pool.Errors()`.
 
 ---
 
