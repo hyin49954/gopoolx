@@ -41,7 +41,7 @@ Designed for real-world production scenarios, not just toy examples.
 ## Install
 
 ```bash
-go get github.com/yourname/gopoolx
+go get github.com/hyin49954/gopoolx
 ```
 
 ---

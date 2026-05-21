@@ -28,7 +28,7 @@
 ## 📦 安装
 
 ```bash
-go get github.com/yourname/gopoolx
+go get github.com/hyin49954/gopoolx
 ```
 
 ---
