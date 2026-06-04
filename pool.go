@@ -16,7 +16,7 @@ type Pool struct {
 	// workerNum 是并发执行任务的 worker 数量
 	workerNum int
 	// tasks 是任务队列，worker 会从该通道中取出任务执行
-	tasks chan Task
+	tasks chan poolTask
 	// wg 用于等待所有提交的任务执行完成
 	wg sync.WaitGroup
 	// once 用于确保任务通道只会被关闭一次，避免多次 Wait 调用导致 panic
@@ -37,11 +37,11 @@ func New(workerNum int, opts ...Option) *Pool {
 		opt(o)
 	}
 
-	var ch chan Task
+	var ch chan poolTask
 	if o.queueSize > 0 {
-		ch = make(chan Task, o.queueSize)
+		ch = make(chan poolTask, o.queueSize)
 	} else {
-		ch = make(chan Task)
+		ch = make(chan poolTask)
 	}
 
 	return &Pool{
@@ -57,40 +57,49 @@ func New(workerNum int, opts ...Option) *Pool {
 //   - QueueFullWait: 队列满时阻塞等待，直到有空位再插入（默认）
 //   - QueueFullDiscard: 队列满时直接丢弃任务，不返回错误
 //   - QueueFullReturnError: 队列满时返回 ErrQueueFull 错误，任务计入失败
-func (p *Pool) Submit(task Task) error {
+func (p *Pool) Submit(task Task) (TaskID, error) {
+	taskID, err := newTaskID()
+	if err != nil {
+		return "", err
+	}
+	pt := poolTask{
+		id:   taskID,
+		task: task,
+	}
+
 	p.wg.Add(1)
 
 	switch p.opts.queueFullPolicy {
 	case QueueFullDiscard:
 		// 队列满时直接丢弃任务
 		select {
-		case p.tasks <- task:
+		case p.tasks <- pt:
 			// 正常入队，由 worker 负责执行并在结束时调用 wg.Done
 		default:
 			// 队列已满：撤销之前的 Add，保持 WaitGroup 计数正确
 			p.wg.Done()
 		}
-		return nil
+		return taskID, nil
 
 	case QueueFullReturnError:
 		// 队列满时返回错误，任务计入失败
 		select {
-		case p.tasks <- task:
+		case p.tasks <- pt:
 			// 正常入队，由 worker 负责执行并在结束时调用 wg.Done
 		default:
 			// 队列已满：撤销之前的 Add，将错误加入错误收集器，并返回错误
 			p.wg.Done()
-			p.errs.Add(ErrQueueFull)
-			return ErrQueueFull
+			p.errs.Add(taskID, ErrQueueFull)
+			return taskID, ErrQueueFull
 		}
-		return nil
+		return taskID, nil
 
 	case QueueFullWait:
 		fallthrough
 	default:
 		// 默认等待模式：在任务队列满时阻塞，直到有空间写入
-		p.tasks <- task
-		return nil
+		p.tasks <- pt
+		return taskID, nil
 	}
 }
 
@@ -113,7 +122,7 @@ func (p *Pool) worker(ctx context.Context) {
 			if !ok {
 				return
 			}
-			p.executeWithRetry(ctx, task)
+			p.executeWithRetry(ctx, task.id, task.task)
 			p.wg.Done()
 		}
 	}
@@ -121,18 +130,18 @@ func (p *Pool) worker(ctx context.Context) {
 
 // executeWithRetry 根据配置执行任务，并在失败时进行重试。
 // 当超过最大重试次数后，会将最终错误加入错误收集器。
-func (p *Pool) executeWithRetry(ctx context.Context, task Task) {
+func (p *Pool) executeWithRetry(ctx context.Context, taskID TaskID, task Task) {
 	var err error
 	// 统一 panic 恢复：无论是否开启重试，任务中的 panic
 	// 都会被转换为 error 并加入错误收集器，避免 worker 整体崩溃。
 	defer func() {
 		if r := recover(); r != nil {
-			p.errs.Add(panicError(r))
+			p.errs.Add(taskID, panicError(r))
 			return
 		}
 		// 非 panic 场景下，如果最终仍有错误，则收集错误
 		if err != nil {
-			p.errs.Add(err)
+			p.errs.Add(taskID, err)
 		}
 	}()
 
@@ -157,8 +166,19 @@ func (p *Pool) Wait() {
 	})
 }
 
+// Error 返回指定任务 ID 对应的执行错误。
+func (p *Pool) Error(taskID TaskID) (error, bool) {
+	return p.errs.Error(taskID)
+}
+
 // Errors 返回一个包含所有任务执行错误的切片副本。
 // 返回的是拷贝，调用方可以安全地在外部修改。
-func (p *Pool) Errors() []error {
+func (p *Pool) Errors() []TaskError {
 	return p.errs.Errors()
+}
+
+// DrainErrors 原子地取出当前所有任务错误并清空错误收集器。
+// 适合长时间运行的 Pool 定期消费错误，避免错误列表无限增长。
+func (p *Pool) DrainErrors() []TaskError {
+	return p.errs.DrainErrors()
 }

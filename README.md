@@ -19,7 +19,7 @@ Designed for real-world production scenarios, not just toy examples.
   - `WithRetryDelay(d)` – delay between retries
 
 - **Centralized error collection**  
-  All task errors are collected and can be obtained via `pool.Errors()`.
+  All task errors are collected and can be obtained via `pool.Errors()`, or by UUID task ID via `pool.Error(taskID)`.
 
 - **Panic recovery**  
   - Panics inside tasks (both normal and result-returning) are safely recovered
@@ -64,16 +64,25 @@ defer cancel()
 pool.Run(ctx)
 
 for i := 0; i < 1000; i++ {
-    pool.Submit(func(ctx context.Context) error {
+    taskID, err := pool.Submit(func(ctx context.Context) error {
         // your task here
         return nil
     })
+    if err != nil {
+        log.Println("submit failed:", taskID, err)
+    }
 }
 
 pool.Wait()
 
 for _, err := range pool.Errors() {
-    log.Println("task error:", err)
+    log.Println("task error:", err.TaskID, err.Err)
+}
+
+// Long-running pools can periodically consume and clear current errors
+// to avoid unbounded error list growth.
+for _, err := range pool.DrainErrors() {
+    log.Println("drained task error:", err.TaskID, err.Err)
 }
 ```
 
@@ -85,19 +94,25 @@ ctx := context.Background()
 
 pool.Run(ctx)
 
-f1 := gopoolx.SubmitWithResult(pool, func(ctx context.Context) (int, error) {
+taskID1, f1, err := gopoolx.SubmitWithResult(pool, func(ctx context.Context) (int, error) {
     time.Sleep(time.Second)
     return 100, nil
 })
+if err != nil {
+    log.Println("submit failed:", taskID1, err)
+}
 
-f2 := gopoolx.SubmitWithResult(pool, func(ctx context.Context) (string, error) {
+taskID2, f2, err := gopoolx.SubmitWithResult(pool, func(ctx context.Context) (string, error) {
     return "hello gopoolx", nil
 })
+if err != nil {
+    log.Println("submit failed:", taskID2, err)
+}
 
 v1, _ := f1.Get(ctx) // can be controlled via ctx for timeout/cancel
 v2, _ := f2.Get(ctx)
 
-fmt.Println(v1, v2)
+fmt.Println(taskID1, v1, taskID2, v2)
 
 pool.Wait()
 ```
@@ -119,9 +134,12 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // Submit will block if the queue is full until space is available
-pool.Submit(func(ctx context.Context) error {
+taskID, err := pool.Submit(func(ctx context.Context) error {
     return nil
 })
+if err != nil {
+    log.Println("submit failed:", taskID, err)
+}
 ```
 
 #### 2. Discard
@@ -136,7 +154,7 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // Submit will return nil immediately, dropped tasks are not executed
-err := pool.Submit(func(ctx context.Context) error {
+taskID, err := pool.Submit(func(ctx context.Context) error {
     return nil
 })
 // err is always nil in discard mode
@@ -156,12 +174,12 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // Submit will return ErrQueueFull if the queue is full
-err := pool.Submit(func(ctx context.Context) error {
+taskID, err := pool.Submit(func(ctx context.Context) error {
     return nil
 })
 if err != nil {
     // Handle queue full error
-    log.Println("Failed to submit task:", err)
+    log.Println("Failed to submit task:", taskID, err)
 }
 ```
 
@@ -171,11 +189,11 @@ if err != nil {
 
 ## Design Highlights
 
-- `Pool` uses a fixed number of workers and a `chan Task` as the task queue.
+- `Pool` uses a fixed number of workers and an internal task queue carrying task IDs.
 - `executeWithRetry` is responsible for:
   - retry logic
   - panic recovery (converting to `error`)
-- `ErrorCollector` provides concurrency-safe error aggregation.
+- `ErrorCollector` provides concurrency-safe error aggregation, lookup by task ID, and atomic consumption via `DrainErrors()`.
 - `Future[T]` exposes a type-safe async result API.
 
 ---
