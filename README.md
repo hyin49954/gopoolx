@@ -73,6 +73,15 @@ for i := 0; i < 1000; i++ {
     }
 }
 
+// You can also pass a business task ID; when omitted or empty,
+// gopoolx generates a UUID by default.
+taskID, err := pool.Submit(func(ctx context.Context) error {
+    return nil
+}, gopoolx.TaskID("order-123"))
+if err != nil {
+    log.Println("submit failed:", taskID, err)
+}
+
 pool.Wait()
 
 for _, err := range pool.Errors() {
@@ -97,7 +106,7 @@ pool.Run(ctx)
 taskID1, f1, err := gopoolx.SubmitWithResult(pool, func(ctx context.Context) (int, error) {
     time.Sleep(time.Second)
     return 100, nil
-})
+}, gopoolx.TaskID("calc-100"))
 if err != nil {
     log.Println("submit failed:", taskID1, err)
 }

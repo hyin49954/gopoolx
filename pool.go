@@ -53,12 +53,13 @@ func New(workerNum int, opts ...Option) *Pool {
 }
 
 // Submit 提交一个任务到池中，内部会递增 WaitGroup 计数。
+// 可选传入 taskID；不传或传空字符串时会自动生成 UUID。
 // 根据配置的队列满策略，行为如下：
 //   - QueueFullWait: 队列满时阻塞等待，直到有空位再插入（默认）
 //   - QueueFullDiscard: 队列满时直接丢弃任务，不返回错误
 //   - QueueFullReturnError: 队列满时返回 ErrQueueFull 错误，任务计入失败
-func (p *Pool) Submit(task Task) (TaskID, error) {
-	taskID, err := newTaskID()
+func (p *Pool) Submit(task Task, taskIDs ...TaskID) (TaskID, error) {
+	taskID, err := resolveTaskID(taskIDs...)
 	if err != nil {
 		return "", err
 	}

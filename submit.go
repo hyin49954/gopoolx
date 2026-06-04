@@ -7,9 +7,11 @@ import "context"
 //   - fn 会在池中的 worker goroutine 中执行
 //   - 若 fn 正常返回，其结果与错误会写入 Future
 //   - 若 fn 发生 panic，会被捕获并转换为 error 返回到 Future
+//   - 可选传入 taskID；不传或传空字符串时会自动生成 UUID
 func SubmitWithResult[T any](
 	pool *Pool,
 	fn func(ctx context.Context) (T, error),
+	taskIDs ...TaskID,
 ) (TaskID, *Future[T], error) {
 
 	future := newFuture[T]()
@@ -34,7 +36,7 @@ func SubmitWithResult[T any](
 
 		res, err = fn(ctx)
 		return err
-	})
+	}, taskIDs...)
 	if err != nil {
 		// 如果提交失败（如队列满且策略为返回错误），立即完成 Future 并返回错误
 		var zero T

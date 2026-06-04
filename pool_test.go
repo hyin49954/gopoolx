@@ -6,6 +6,35 @@ import (
 	"testing"
 )
 
+func TestSubmitUsesProvidedTaskID(t *testing.T) {
+	pool := New(1)
+	ctx := context.Background()
+	wantTaskID := TaskID("custom-task-id")
+	taskErr := errors.New("custom task failed")
+
+	pool.Run(ctx)
+
+	taskID, err := pool.Submit(func(ctx context.Context) error {
+		return taskErr
+	}, wantTaskID)
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if taskID != wantTaskID {
+		t.Fatalf("Submit() task ID = %s, want %s", taskID, wantTaskID)
+	}
+
+	pool.Wait()
+
+	got, ok := pool.Error(wantTaskID)
+	if !ok {
+		t.Fatalf("Error(%s) not found", wantTaskID)
+	}
+	if !errors.Is(got, taskErr) {
+		t.Fatalf("Error(%s) = %v, want %v", wantTaskID, got, taskErr)
+	}
+}
+
 func TestPoolErrorByTaskID(t *testing.T) {
 	pool := New(1)
 	ctx := context.Background()
@@ -116,4 +145,32 @@ func TestDrainErrorsClearsOnlyCurrentErrors(t *testing.T) {
 	if !errors.Is(got, newErr) {
 		t.Fatalf("Error(%s) = %v, want %v", newTaskID, got, newErr)
 	}
+}
+
+func TestSubmitWithResultUsesProvidedTaskID(t *testing.T) {
+	pool := New(1)
+	ctx := context.Background()
+	wantTaskID := TaskID("custom-result-task-id")
+
+	pool.Run(ctx)
+
+	taskID, future, err := SubmitWithResult(pool, func(ctx context.Context) (int, error) {
+		return 42, nil
+	}, wantTaskID)
+	if err != nil {
+		t.Fatalf("SubmitWithResult() error = %v", err)
+	}
+	if taskID != wantTaskID {
+		t.Fatalf("SubmitWithResult() task ID = %s, want %s", taskID, wantTaskID)
+	}
+
+	got, err := future.Get(ctx)
+	if err != nil {
+		t.Fatalf("Future.Get() error = %v", err)
+	}
+	if got != 42 {
+		t.Fatalf("Future.Get() result = %d, want 42", got)
+	}
+
+	pool.Wait()
 }
