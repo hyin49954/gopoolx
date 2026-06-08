@@ -17,7 +17,7 @@ func SubmitWithResult[T any](
 	future := newFuture[T]()
 
 	// 将带返回值的函数包装成 Pool 所需的 Task 形式
-	taskID, err := pool.Submit(func(ctx context.Context) error {
+	taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
 		var (
 			res T
 			err error
@@ -35,7 +35,7 @@ func SubmitWithResult[T any](
 		}()
 
 		res, err = fn(ctx)
-		return err
+		return res, err
 	}, taskIDs...)
 	if err != nil {
 		// 如果提交失败（如队列满且策略为返回错误），立即完成 Future 并返回错误

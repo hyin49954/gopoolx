@@ -11,7 +11,8 @@ type TaskID string
 
 // Task 是提交到 Pool 中执行的基本任务类型。
 // 参数为上层传入的上下文，允许任务根据 ctx 进行超时或取消控制。
-type Task func(ctx context.Context) error
+// 任务失败时，可通过返回值 any 携带附加数据，并写入 TaskError.Data。
+type Task func(ctx context.Context) (any, error)
 
 type poolTask struct {
 	id   TaskID

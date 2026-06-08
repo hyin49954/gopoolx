@@ -19,7 +19,7 @@ Designed for real-world production scenarios, not just toy examples.
   - `WithRetryDelay(d)` – delay between retries
 
 - **Centralized error collection**  
-  All task errors are collected and can be obtained via `pool.Errors()`, or by UUID task ID via `pool.Error(taskID)`.
+  All task errors are collected and can be obtained via `pool.Errors()`, or by UUID task ID via `pool.Error(taskID)`. Failed tasks can also carry extra return data in `TaskError.Data`.
 
 - **Panic recovery**  
   - Panics inside tasks (both normal and result-returning) are safely recovered
@@ -64,9 +64,9 @@ defer cancel()
 pool.Run(ctx)
 
 for i := 0; i < 1000; i++ {
-    taskID, err := pool.Submit(func(ctx context.Context) error {
+    taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
         // your task here
-        return nil
+        return nil, nil
     })
     if err != nil {
         log.Println("submit failed:", taskID, err)
@@ -75,8 +75,8 @@ for i := 0; i < 1000; i++ {
 
 // You can also pass a business task ID; when omitted or empty,
 // gopoolx generates a UUID by default.
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 }, gopoolx.TaskID("order-123"))
 if err != nil {
     log.Println("submit failed:", taskID, err)
@@ -85,13 +85,13 @@ if err != nil {
 pool.Wait()
 
 for _, err := range pool.Errors() {
-    log.Println("task error:", err.TaskID, err.Err)
+    log.Println("task error:", err.TaskID, err.Err, err.Data)
 }
 
 // Long-running pools can periodically consume and clear current errors
 // to avoid unbounded error list growth.
 for _, err := range pool.DrainErrors() {
-    log.Println("drained task error:", err.TaskID, err.Err)
+    log.Println("drained task error:", err.TaskID, err.Err, err.Data)
 }
 ```
 
@@ -143,8 +143,8 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // Submit will block if the queue is full until space is available
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 })
 if err != nil {
     log.Println("submit failed:", taskID, err)
@@ -163,8 +163,8 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // Submit will return nil immediately, dropped tasks are not executed
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 })
 // err is always nil in discard mode
 ```
@@ -183,8 +183,8 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // Submit will return ErrQueueFull if the queue is full
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 })
 if err != nil {
     // Handle queue full error

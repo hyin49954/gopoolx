@@ -9,6 +9,8 @@ import (
 type TaskError struct {
 	TaskID TaskID
 	Err    error
+	// Data 是任务失败时附带的额外返回值。
+	Data any
 }
 
 func (e TaskError) Error() string {
@@ -26,25 +28,27 @@ type ErrorCollector struct {
 	// errs 存放所有收集到的错误
 	errs []TaskError
 	// byTask 支持按任务 ID 快速查询错误
-	byTask map[TaskID]error
+	byTask map[TaskID]TaskError
 }
 
 // Add 将一个错误加入收集器。
 // 若 err 为 nil，会被直接忽略。
-func (e *ErrorCollector) Add(taskID TaskID, err error) {
+func (e *ErrorCollector) Add(taskID TaskID, err error, data any) {
 	if err == nil {
 		return
 	}
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.byTask == nil {
-		e.byTask = make(map[TaskID]error)
+		e.byTask = make(map[TaskID]TaskError)
 	}
-	e.errs = append(e.errs, TaskError{
+	taskErr := TaskError{
 		TaskID: taskID,
 		Err:    err,
-	})
-	e.byTask[taskID] = err
+		Data:   data,
+	}
+	e.errs = append(e.errs, taskErr)
+	e.byTask[taskID] = taskErr
 }
 
 // Errors 返回一个包含已收集错误的切片副本。
@@ -67,10 +71,10 @@ func (e *ErrorCollector) DrainErrors() []TaskError {
 	return errs
 }
 
-// Error 返回指定任务 ID 对应的错误。
-func (e *ErrorCollector) Error(taskID TaskID) (error, bool) {
+// Error 返回指定任务 ID 对应的错误记录。
+func (e *ErrorCollector) Error(taskID TaskID) (TaskError, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	err, ok := e.byTask[taskID]
-	return err, ok
+	taskErr, ok := e.byTask[taskID]
+	return taskErr, ok
 }

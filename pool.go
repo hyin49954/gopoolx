@@ -90,7 +90,7 @@ func (p *Pool) Submit(task Task, taskIDs ...TaskID) (TaskID, error) {
 		default:
 			// 队列已满：撤销之前的 Add，将错误加入错误收集器，并返回错误
 			p.wg.Done()
-			p.errs.Add(taskID, ErrQueueFull)
+			p.errs.Add(taskID, ErrQueueFull, nil)
 			return taskID, ErrQueueFull
 		}
 		return taskID, nil
@@ -132,22 +132,25 @@ func (p *Pool) worker(ctx context.Context) {
 // executeWithRetry 根据配置执行任务，并在失败时进行重试。
 // 当超过最大重试次数后，会将最终错误加入错误收集器。
 func (p *Pool) executeWithRetry(ctx context.Context, taskID TaskID, task Task) {
-	var err error
+	var (
+		err  error
+		data any
+	)
 	// 统一 panic 恢复：无论是否开启重试，任务中的 panic
 	// 都会被转换为 error 并加入错误收集器，避免 worker 整体崩溃。
 	defer func() {
 		if r := recover(); r != nil {
-			p.errs.Add(taskID, panicError(r))
+			p.errs.Add(taskID, panicError(r), nil)
 			return
 		}
 		// 非 panic 场景下，如果最终仍有错误，则收集错误
 		if err != nil {
-			p.errs.Add(taskID, err)
+			p.errs.Add(taskID, err, data)
 		}
 	}()
 
 	for i := 0; i <= p.opts.retry; i++ {
-		err = task(ctx)
+		data, err = task(ctx)
 		if err == nil {
 			return
 		}
@@ -167,8 +170,8 @@ func (p *Pool) Wait() {
 	})
 }
 
-// Error 返回指定任务 ID 对应的执行错误。
-func (p *Pool) Error(taskID TaskID) (error, bool) {
+// Error 返回指定任务 ID 对应的执行错误记录。
+func (p *Pool) Error(taskID TaskID) (TaskError, bool) {
 	return p.errs.Error(taskID)
 }
 

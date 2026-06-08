@@ -11,7 +11,7 @@
 - **固定 Worker 数量**：限制并发度，防止 goroutine 爆炸
 - **统一上下文控制**：基于 `context.Context` 的取消 / 超时控制
 - **失败自动重试**：支持设置重试次数与重试间隔（`WithRetry` / `WithRetryDelay`）
-- **统一错误收集**：所有任务执行错误集中到 `pool.Errors()` 中，并可通过 UUID 格式的 `taskId` 查询单个任务错误
+- **统一错误收集**：所有任务执行错误集中到 `pool.Errors()` 中，并可通过 UUID 格式的 `taskId` 查询单个任务错误；失败时还可携带 `Data any` 附加返回值
 - **panic 自动恢复**：
   - 普通任务与带返回值任务中的 panic 都会被安全捕获并转换为 `error`
   - 不会打爆整个 worker 协程
@@ -51,9 +51,9 @@ defer cancel()
 pool.Run(ctx)
 
 for i := 0; i < 1000; i++ {
-    taskID, err := pool.Submit(func(ctx context.Context) error {
+    taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
         // 执行你的任务
-        return nil
+        return nil, nil
     })
     if err != nil {
         log.Println("submit failed:", taskID, err)
@@ -61,8 +61,8 @@ for i := 0; i < 1000; i++ {
 }
 
 // 也可以传入业务自己的 taskId；不传或传空字符串时默认生成 UUID
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 }, gopoolx.TaskID("order-123"))
 if err != nil {
     log.Println("submit failed:", taskID, err)
@@ -71,12 +71,12 @@ if err != nil {
 pool.Wait()
 
 for _, err := range pool.Errors() {
-    log.Println("task error:", err.TaskID, err.Err)
+    log.Println("task error:", err.TaskID, err.Err, err.Data)
 }
 
 // 长时间运行的 Pool 可以定期消费并清空当前错误，避免错误列表持续增长
 for _, err := range pool.DrainErrors() {
-    log.Println("drained task error:", err.TaskID, err.Err)
+    log.Println("drained task error:", err.TaskID, err.Err, err.Data)
 }
 ```
 
@@ -128,8 +128,8 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // 队列满时 Submit 会阻塞，直到有空位再插入
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 })
 if err != nil {
     log.Println("提交任务失败:", taskID, err)
@@ -148,8 +148,8 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // Submit 会立即返回 nil，被丢弃的任务不会执行
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 })
 // 丢弃模式下 err 始终为 nil
 ```
@@ -168,8 +168,8 @@ pool := gopoolx.New(
 pool.Run(context.Background())
 
 // 队列满时 Submit 会返回 ErrQueueFull 错误
-taskID, err := pool.Submit(func(ctx context.Context) error {
-    return nil
+taskID, err := pool.Submit(func(ctx context.Context) (any, error) {
+    return nil, nil
 })
 if err != nil {
     // 处理队列满错误
